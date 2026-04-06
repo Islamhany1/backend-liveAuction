@@ -1,4 +1,4 @@
-package com.liveauction.backend_liveAuction.entity;
+package com.liveauction.backend_liveAuction.entities;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
