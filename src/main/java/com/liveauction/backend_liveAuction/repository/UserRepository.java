@@ -1,6 +1,6 @@
-package com.liveauction.backend_liveAuction.repositories;
+package com.liveauction.backend_liveAuction.repository;
 
-import com.liveauction.backend_liveAuction.entities.User;
+import com.liveauction.backend_liveAuction.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
