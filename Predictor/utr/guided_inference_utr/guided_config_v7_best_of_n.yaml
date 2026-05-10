@@ -1,0 +1,101 @@
+# =============================================================================
+# UTR guided inference — v7: Best-of-N selection
+# =============================================================================
+#
+# Strategy
+# --------
+# Build on V5's best settings (DDPM, Tweedie x̂₀, t_max=50, gc_weight=0.5,
+# w=100 → MRL=7.643) and add Best-of-N selection on top:
+#
+#   1. Generate a large pool of N=512 guided sequences per scale.
+#   2. Score all 512 with the predictor at t=0 (clean embedding).
+#   3. Keep the top best_of_n_keep=128 by Predicted_MRL (top 25%).
+#
+# Motivation
+# ----------
+# The predictor checkpoint has:
+#   best_val_high_mean_true_rl_at_selection_fraction = 8.135
+# meaning: when the predictor picks its top 5% of validation sequences, the
+# TRUE mean MRL of those sequences is 8.135 — vs 7.621 baseline.
+# Best-of-N directly exploits this discriminative ability at inference time:
+# even imperfect guidance shifts the pool distribution rightward, and the
+# predictor then selects the best tail of that shifted distribution.
+#
+# Thesis alignment
+# ----------------
+# T5  — predictor-guided DDPM sampling (guidance_scale, objective)
+# T7b — multi-objective GC constraint (gc_weight=0.5, target_gc=0.44)
+# T7c — guidance-scale sweep for ablation figures
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Experiment metadata
+# -----------------------------------------------------------------------------
+experiment_name: "utr_guided_generation_v7_best_of_n"
+
+
+# -----------------------------------------------------------------------------
+# Filesystem paths
+# -----------------------------------------------------------------------------
+paths:
+  generator_model:        "../generator/utr_generator_checkpoints/best.pt"
+  noisy_predictor_model:  "../noisy_predictor/utr_noisy_predictor_checkpoints/utr_noisy_predictor_best.pt"
+  output_dir:             "generated_results/v7_best_of_n"
+
+
+# -----------------------------------------------------------------------------
+# Sequence generation settings
+# -----------------------------------------------------------------------------
+generation:
+  # Generate a large pool per scale; Best-of-N will thin it down
+  num_sequences: 512         # pool size — more is better for selection
+  batch_size: 64             # sequences per GPU batch (512/64 = 8 batches)
+  max_len: 50                # UTR length (must match generator training)
+
+  # ---- Best-of-N selection -------------------------------------------------
+  # After generating num_sequences, score all and keep the top-K by
+  # Predicted_MRL. The primary output CSV contains only these K sequences.
+  # The full pool is also saved as *_all.csv for analysis.
+  # Set to 0 to disable (keep everything).
+  best_of_n_keep: 128        # keep top 128/512 = top 25% per scale
+
+  # ---- Guidance objective: T7b multi-objective (TE + GC) ------------------
+  # V5 result: GC constraint prevents AT-drift that hurt V3/V4 at high w.
+  # te_weight=1.0 drives high-expression; gc_weight=0.5 keeps GC near 44%.
+  objective: "high_score"    # overridden by gc_weight != 0 (multi-objective)
+  te_weight: 1.0
+  gc_weight: 0.5             # T7b: penalize deviation from target GC
+  target_gc: 0.44            # natural human 5'UTR mean GC
+
+  # ---- Guidance timestep window -------------------------------------------
+  # t_max=50: guidance fires only at t=50..0 where ᾱ_t ≥ 0.97 (≥97% signal).
+  # Predictor gradient is reliable here; at t≤300 (60% noise) it is not.
+  guidance_timestep_max: 50
+
+  # ---- T7c: guidance-scale sweep ------------------------------------------
+  # w=0 gives the unguided baseline for this pool size.
+  # V5 showed w=100 is the sweet spot with t_max=50 + GC constraint.
+  # Add w=200 to check if Best-of-N lets us push harder.
+  guidance_scale_sweep: [0, 50, 100, 200]
+
+  # ---- Other settings -------------------------------------------------------
+  frozen_aug_codon: false
+  seed: 42
+
+
+# -----------------------------------------------------------------------------
+# DDPM noise schedule (must match the generator's training schedule)
+# -----------------------------------------------------------------------------
+diffusion:
+  num_timesteps: 1000
+  beta_start: 0.0001
+  beta_end: 0.02
+
+
+# -----------------------------------------------------------------------------
+# Weights & Biases logging
+# -----------------------------------------------------------------------------
+wandb:
+  project: "utr-guided-inference"
+  enabled: true
